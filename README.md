@@ -17,6 +17,24 @@ Our framework consists of three key agents working in concert:
 2. **DirectorAgent**: Generates multi-shot videos from scripts while maintaining visual continuity
 3. **CriticAgent**: Evaluates both script quality and video generation fidelity
 
+## Requirements
+
+The pipeline stages have different requirements depending on how you run them:
+
+| Stage | What it needs | Hardware |
+|-------|--------------|----------|
+| **ScriptAgent** (local) | `XD-MU/ScriptAgent` model weights + `ms-swift[llm]` + `torch` | CUDA GPU |
+| **ScriptAgent** (online) | Use the [HuggingFace demo](https://huggingface.co/spaces/XD-MU/ScriptAgent), save output to a `.txt` file | None |
+| **DirectorAgent** | `GEMINI_API_KEY` (Veo) or `OPENAI_API_KEY` (Sora) | None (API call) |
+| **CriticAgent** script eval | `OPENAI_API_KEY` | None (API call) |
+| **CriticAgent** video eval (Gemini) | `GEMINI_API_KEY` | None (API call) |
+| **CriticAgent** video eval (Qwen) | `Qwen3-Omni` local model + `torch` | CUDA GPU |
+| **CriticAgent** objective metrics | `torch`, CLIP, I3D | CUDA GPU |
+
+**Minimum path (no GPU):** Use the online demo to generate a script, then run DirectorAgent + CriticAgent evaluation via API calls only. This requires `OPENAI_API_KEY` + `GEMINI_API_KEY` and no local GPU.
+
+**Full local path:** Requires a CUDA GPU with sufficient VRAM to run the ScriptAgent model locally.
+
 ## Setup
 
 ### 1. Clone and configure API keys
