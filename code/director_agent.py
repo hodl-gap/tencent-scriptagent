@@ -451,6 +451,8 @@ def parse_script_sections(script_text: str) -> Dict[str, str]:
     name_map = {
         "dialogue": "dialogue",
         "character profiles": "character profiles",
+        "character descriptions": "character profiles",
+        "character description": "character profiles",
         "scene description": "scene description",
         "blocking": "blocking",
     }
@@ -475,7 +477,7 @@ def parse_station_nodes(station_text: str, expected: int) -> List[str]:
         return []
     if not station_text:
         return ["Station information to be supplemented"] * expected
-    pattern = re.compile(r"^\s*(\d+)[\.、\-]?\s*(.+)$", re.M)
+    pattern = re.compile(r"^\s*(\d+)[\.：:、\-]?\s*(.+)$", re.M)
     entries = [match.group(2).strip() for match in pattern.finditer(station_text)]
     if not entries:
         entries = [item.strip() for item in re.split(r"[\n；;]", station_text) if item.strip()]
@@ -489,7 +491,8 @@ def parse_station_nodes(station_text: str, expected: int) -> List[str]:
 
 
 def extract_time_spans_from_nodes(nodes: List[str]) -> List[Tuple[int, int]]:
-    span_pattern = re.compile(r"\[(\d+)seconds-(\d+)seconds\]")
+    # Match both "[6seconds-11seconds]" and "[6s-11s]" formats
+    span_pattern = re.compile(r"\[(\d+)s(?:econds)?-(\d+)s(?:econds)?\]")
     spans: List[Tuple[int, int]] = []
     for node in nodes:
         match = span_pattern.search(node)
