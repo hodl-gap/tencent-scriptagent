@@ -1,5 +1,11 @@
 # The Script is All You Need: An Agentic Framework for Long-Horizon Dialogue-to-Cinematic Video Generation
 
+> **Disclaimer:** This repository is a fork of the original work by the Tencent research team
+> ([paper](https://arxiv.org/abs/2601.17737), [project page](https://xd-mu.github.io/ScriptIsAllYouNeed/)).
+> All credit for the research, model, and framework design goes to the original authors.
+> This version has been modified only to replace internal dependencies with public APIs
+> for external testing and evaluation purposes.
+
 ## Overview
 <p align="center">
   <img src="./figures/overview.png" alt="Framework Overview" width="100%">
