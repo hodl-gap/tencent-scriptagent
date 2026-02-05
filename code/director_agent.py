@@ -1492,7 +1492,6 @@ class Api:
         seconds: int,
     ) -> Optional[str]:
         import time as _time
-        import urllib.request
 
         try:
             import openai as _openai
@@ -1518,14 +1517,17 @@ class Api:
                 "Consider using veo3.1 for image-to-video support."
             )
 
+        # Sora API accepts seconds as string literal: '4', '8', or '12'
+        sora_seconds = str(seconds) if seconds in (4, 8, 12) else '8'
+
         try:
             LOGGER.info("Calling Sora API (%s), prompt length: %d", api_model, len(text))
 
             response = client.videos.create(
                 model=api_model,
                 prompt=text,
-                duration=seconds,
-                resolution=size,
+                seconds=sora_seconds,
+                size=size,
             )
 
             # Poll until done
@@ -1547,12 +1549,12 @@ class Api:
                 elapsed += poll_interval
                 LOGGER.debug("Sora polling... status=%s (%ds)", job.status, elapsed)
 
-            video_url = job.video_url
-            if not video_url:
-                return "Sora returned no video URL"
-
+            # Download via SDK (Video object has no direct URL)
             LOGGER.info("Downloading Sora video...")
-            urllib.request.urlretrieve(video_url, output_path)
+            content = client.videos.download_content(job.id)
+            with open(output_path, "wb") as f:
+                for chunk in content.iter_bytes():
+                    f.write(chunk)
 
             LOGGER.info("Sora video saved to %s", output_path)
             return None
