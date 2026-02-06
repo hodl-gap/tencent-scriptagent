@@ -1308,12 +1308,12 @@ class Api:
     and only need the API key for that model's service.  The models are
     not combined; they are alternatives to each other.
 
-    Implemented (SDKs already required by this project):
-      - veo3.1, veo3.1-fast : Google Veo via google-genai
-      - sora2-pro, sora2    : OpenAI Sora via openai
+    Implemented:
+      - veo3.1, veo3.1-fast      : Google Veo via google-genai
+      - sora2-pro, sora2         : OpenAI Sora via openai
+      - Wan2.5, wan_t2v, wan_i2v : Alibaba Wan via dashscope
 
     Not yet wired (each needs its own SDK / REST client):
-      - Wan2.5, wan_t2v, wan_i2v : Alibaba DashScope (pip install dashscope)
       - keling                   : Kling REST API
       - jimeng                   : ByteDance Jimeng REST API
       - ViduQ2, vidu_refer, vidu_image : Vidu REST API
@@ -1329,10 +1329,18 @@ class Api:
         "sora2": "sora-2",
     }
 
+    _WAN_MODELS: Dict[str, str] = {
+        "Wan2.5": "wan2.6-t2v",  # Auto-switch handled in generate()
+        "wan_t2v": "wan2.6-t2v",
+        "wan_i2v": "wan2.6-i2v",
+        "wan_i2v_flash": "wan2.6-i2v-flash",
+    }
+
     def __init__(
         self,
         openai_api_key: str = "",
         gemini_api_key: str = "",
+        dashscope_api_key: str = "",
     ) -> None:
         self.openai_api_key = (
             openai_api_key
@@ -1342,6 +1350,10 @@ class Api:
             gemini_api_key
             or os.environ.get("GEMINI_API_KEY", "")
             or os.environ.get("GOOGLE_API_KEY", "")
+        )
+        self.dashscope_api_key = (
+            dashscope_api_key
+            or os.environ.get("DASHSCOPE_API_KEY", "")
         )
         self.timeout = 3600
 
@@ -1372,11 +1384,9 @@ class Api:
                 text, pic_path, output_path, model, size, seconds,
             )
 
-        # -- Models not yet wired to public APIs --
-        if model.startswith("wan") or model == "Wan2.5":
-            return (
-                f"Model '{model}' requires dashscope SDK "
-                "(pip install dashscope, set DASHSCOPE_API_KEY)."
+        if model in self._WAN_MODELS or model.startswith("wan") or model == "Wan2.5":
+            return self._call_wan(
+                text, pic_path, output_path, model, size, seconds,
             )
         if model.startswith("vidu") or model == "ViduQ2":
             return f"Model '{model}' requires Vidu REST API (not yet implemented)."
@@ -1564,6 +1574,156 @@ class Api:
 
         except Exception as exc:
             LOGGER.error("Sora API call failed: %s: %s", type(exc).__name__, exc)
+            return str(exc)
+
+    # ------------------------------------------------------------------
+    # Alibaba Wan  (dashscope SDK)
+    # ------------------------------------------------------------------
+
+    def _call_wan(
+        self,
+        text: str,
+        pic_path: Optional[List[str]],
+        output_path: str,
+        model: str,
+        size: str,
+        seconds: int,
+    ) -> Optional[str]:
+        import time as _time
+        import base64
+        import mimetypes
+
+        try:
+            import dashscope
+            from dashscope import VideoSynthesis
+        except ImportError:
+            return "dashscope package required. Install: pip install dashscope"
+
+        if not self.dashscope_api_key:
+            return (
+                "DashScope API key required for Wan. "
+                "Pass --dashscope_api_key or set DASHSCOPE_API_KEY."
+            )
+
+        # Use international endpoint
+        dashscope.base_http_api_url = 'https://dashscope-intl.aliyuncs.com/api/v1'
+
+        # Map model name to API model
+        api_model = self._WAN_MODELS.get(model)
+        if not api_model:
+            # Fallback for direct model names like "wan2.6-t2v"
+            api_model = model
+
+        # Determine if this is image-to-video based on model name and pic_path
+        is_i2v = "i2v" in model.lower() or (pic_path and len(pic_path) > 0)
+
+        # Switch to i2v model if we have an image but model is t2v
+        if is_i2v and "t2v" in api_model:
+            api_model = api_model.replace("t2v", "i2v")
+            LOGGER.info(f"Switching to image-to-video model: {api_model}")
+
+        # Normalize resolution format (Wan uses "720P" not "720p")
+        resolution = size.upper() if size else "720P"
+        if not resolution.endswith("P"):
+            # Handle formats like "1280x720" -> "720P"
+            if "720" in resolution:
+                resolution = "720P"
+            elif "1080" in resolution:
+                resolution = "1080P"
+            elif "480" in resolution:
+                resolution = "480P"
+            else:
+                resolution = "720P"
+
+        # Clamp duration to Wan limits (2-15 seconds for wan2.6)
+        duration = max(2, min(15, seconds))
+
+        # Build API call kwargs
+        call_kwargs: Dict[str, Any] = {
+            "api_key": self.dashscope_api_key,
+            "model": api_model,
+            "prompt": text,
+            "resolution": resolution,
+            "duration": duration,
+        }
+
+        # Handle reference image for image-to-video
+        if is_i2v and pic_path:
+            img_path = pic_path[0]
+            try:
+                mime_type, _ = mimetypes.guess_type(img_path)
+                if not mime_type:
+                    mime_type = "image/png"
+                with open(img_path, "rb") as f:
+                    img_data = base64.b64encode(f.read()).decode("utf-8")
+                call_kwargs["img_url"] = f"data:{mime_type};base64,{img_data}"
+                LOGGER.info(f"Using reference image for i2v: {img_path}")
+            except Exception as e:
+                LOGGER.warning(f"Failed to load reference image: {e}, proceeding without it")
+
+        try:
+            LOGGER.info(
+                "Calling Wan API (%s), resolution=%s, duration=%ds, prompt length=%d",
+                api_model, resolution, duration, len(text)
+            )
+
+            # Submit async task
+            rsp = VideoSynthesis.async_call(**call_kwargs)
+
+            if rsp.status_code != 200:
+                return f"Wan API error: {rsp.message}"
+
+            task_id = rsp.output.get("task_id")
+            if not task_id:
+                return "Wan API returned no task_id"
+
+            LOGGER.info(f"Wan task submitted: {task_id}")
+
+            # Poll for completion
+            elapsed = 0
+            poll_interval = 10
+            while True:
+                if elapsed >= self.timeout:
+                    return f"Wan generation timed out after {self.timeout}s"
+
+                status_rsp = VideoSynthesis.fetch(
+                    task=task_id,
+                    api_key=self.dashscope_api_key,
+                )
+
+                task_status = status_rsp.output.get("task_status", "UNKNOWN")
+
+                if task_status == "SUCCEEDED":
+                    break
+                if task_status in ("FAILED", "CANCELED"):
+                    error_msg = status_rsp.output.get("message", "Unknown error")
+                    return f"Wan generation failed: {error_msg}"
+
+                _time.sleep(poll_interval)
+                elapsed += poll_interval
+                LOGGER.debug("Wan polling... status=%s (%ds)", task_status, elapsed)
+
+            # Get video URL from response
+            video_url = status_rsp.output.get("video_url")
+            if not video_url:
+                # Try alternate response structure
+                results = status_rsp.output.get("results", [])
+                if results:
+                    video_url = results[0].get("url")
+
+            if not video_url:
+                return "Wan API returned no video URL"
+
+            # Download video
+            LOGGER.info(f"Downloading Wan video from {video_url[:80]}...")
+            import urllib.request
+            urllib.request.urlretrieve(video_url, output_path)
+
+            LOGGER.info("Wan video saved to %s", output_path)
+            return None
+
+        except Exception as exc:
+            LOGGER.error("Wan API call failed: %s: %s", type(exc).__name__, exc)
             return str(exc)
 
 
@@ -2129,6 +2289,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--veo_audio", action="store_true", help="Whether VEO generates audio")
     parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API key (for Sora models, or set OPENAI_API_KEY env var)")
     parser.add_argument("--gemini_api_key", type=str, default="", help="Google Gemini API key (for Veo models, or set GEMINI_API_KEY env var)")
+    parser.add_argument("--dashscope_api_key", type=str, default="", help="Alibaba DashScope API key (for Wan models, or set DASHSCOPE_API_KEY env var)")
     parser.add_argument("--log_level", type=str, default="INFO", help="Log level, e.g., INFO/DEBUG")
     parser.add_argument("--max_retry", type=int, default=5, help="Maximum retry count after single segment call failure")
     parser.add_argument(
@@ -2234,6 +2395,7 @@ def main() -> None:
     api = Api(
         openai_api_key=args.openai_api_key,
         gemini_api_key=args.gemini_api_key,
+        dashscope_api_key=args.dashscope_api_key,
     )
 
     tts_estimator: Optional[PaddlespeechTTSDurationEstimator] = None

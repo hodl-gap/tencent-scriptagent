@@ -57,6 +57,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "Falls back to GEMINI_API_KEY env var / .env file.",
     )
     parser.add_argument(
+        "--dashscope_api_key",
+        type=str,
+        default=os.environ.get("DASHSCOPE_API_KEY", ""),
+        help="Alibaba DashScope API key (for Wan video gen). "
+        "Falls back to DASHSCOPE_API_KEY env var / .env file.",
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         default="./output",
@@ -80,7 +87,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default="veo3.1",
         help="Video generation model name (default: veo3.1). "
         "veo3.1/veo3.1-fast need --gemini_api_key; "
-        "sora2-pro/sora2 need --openai_api_key.",
+        "sora2-pro/sora2 need --openai_api_key; "
+        "Wan2.5/wan_t2v/wan_i2v need --dashscope_api_key.",
     )
     parser.add_argument(
         "--style",
@@ -118,6 +126,7 @@ def main() -> None:
     # --- Validate API keys ---
     veo_models = {"veo3.1", "veo3.1-fast"}
     sora_models = {"sora2-pro", "sora2"}
+    wan_models = {"Wan2.5", "wan_t2v", "wan_i2v", "wan_i2v_flash"}
 
     if args.video_model in veo_models and not args.gemini_api_key:
         parser.error(
@@ -127,6 +136,11 @@ def main() -> None:
     if args.video_model in sora_models and not args.openai_api_key:
         parser.error(
             f"--openai_api_key (or OPENAI_API_KEY env var) is required for {args.video_model}. "
+            "Set it in .env or pass it on the command line."
+        )
+    if args.video_model in wan_models and not args.dashscope_api_key:
+        parser.error(
+            f"--dashscope_api_key (or DASHSCOPE_API_KEY env var) is required for {args.video_model}. "
             "Set it in .env or pass it on the command line."
         )
     if not args.skip_eval:
@@ -176,10 +190,12 @@ def main() -> None:
         slugify_model_name,
     )
 
+    # API keys: each video model needs its respective key.
     # Gemini key is shared: Veo (video gen) and Gemini (video eval) use the same key.
     api = Api(
         openai_api_key=args.openai_api_key,
         gemini_api_key=args.gemini_api_key,
+        dashscope_api_key=args.dashscope_api_key,
     )
     style_key = resolve_style_key(args.style)
 
