@@ -114,6 +114,8 @@ SORA_SUPPORTED_SIZES: Sequence[str] = ("1280x720", "720x1280", "1024x1792", "179
 SORA_SUPPORTED_SECONDS: Sequence[int] = (4, 8, 12)
 VEO_SUPPORTED_SIZES: Sequence[str] = ("720p", "1080p")
 VEO_SUPPORTED_SECONDS: Sequence[int] = (4, 6, 8)
+# Wan supports 2-15 seconds, so we allow any value in that range
+WAN_SUPPORTED_SECONDS: Sequence[int] = tuple(range(2, 16))  # (2, 3, 4, ..., 15)
 
 # Model default configuration
 # Important note: The core four models (sora2-pro, veo3.1, Wan2.5, ViduQ2) uniformly use 720p resolution (1280x720)
@@ -2186,7 +2188,13 @@ class StoryVideoGenerator:
             return self.seconds
 
         padded = estimated + self.duration_padding
-        choices = VEO_SUPPORTED_SECONDS if self.model.startswith("veo") else SORA_SUPPORTED_SECONDS
+        is_wan = self.model.startswith("wan") or self.model == "Wan2.5"
+        if self.model.startswith("veo"):
+            choices = VEO_SUPPORTED_SECONDS
+        elif is_wan:
+            choices = WAN_SUPPORTED_SECONDS
+        else:
+            choices = SORA_SUPPORTED_SECONDS
         seconds = self._pick_allowed_duration(padded, choices)
 
         LOGGER.info(
@@ -2203,8 +2211,23 @@ class StoryVideoGenerator:
         if preferred is None:
             return base_seconds
 
-        choices = VEO_SUPPORTED_SECONDS if self.model.startswith("veo") else SORA_SUPPORTED_SECONDS
+        # Determine allowed durations based on model
+        is_wan = self.model.startswith("wan") or self.model == "Wan2.5"
+        if self.model.startswith("veo"):
+            choices = VEO_SUPPORTED_SECONDS
+        elif is_wan:
+            choices = WAN_SUPPORTED_SECONDS
+        else:
+            choices = SORA_SUPPORTED_SECONDS
+
         allowed = sorted(int(value) for value in choices)
+
+        # For Wan, use the script's preferred duration directly if it's in range
+        if is_wan and preferred is not None:
+            clamped = max(2, min(15, preferred))
+            LOGGER.debug(f"Wan model: using script duration {clamped}s (preferred={preferred})")
+            return clamped
+
         target = max(4, min(10, preferred))
 
         candidate = next((value for value in allowed if value >= target and value <= 10), None)
