@@ -1643,28 +1643,33 @@ class Api:
             api_model = api_model.replace("t2v", "i2v")
             LOGGER.info(f"Switching to image-to-video model: {api_model}")
 
-        # Normalize resolution format (Wan uses "720P" not "720p")
-        resolution = size.upper() if size else "720P"
-        if not resolution.endswith("P"):
-            # Handle formats like "1280x720" -> "720P"
-            if "720" in resolution:
-                resolution = "720P"
-            elif "1080" in resolution:
-                resolution = "1080P"
-            elif "480" in resolution:
-                resolution = "480P"
-            else:
-                resolution = "720P"
+        # Normalize resolution format
+        # Wan API expects exact dimensions with asterisk: "1280*720", not "720P"
+        # Map common formats to exact dimensions
+        resolution_map = {
+            "720P": "1280*720",
+            "720p": "1280*720",
+            "1280x720": "1280*720",
+            "1280*720": "1280*720",
+            "1080P": "1920*1080",
+            "1080p": "1920*1080",
+            "1920x1080": "1920*1080",
+            "1920*1080": "1920*1080",
+            "480P": "854*480",
+            "480p": "854*480",
+        }
+        resolution = resolution_map.get(size, "1280*720")  # default to 720p
 
         # Clamp duration to Wan limits (2-15 seconds for wan2.6)
         duration = max(2, min(15, seconds))
 
         # Build API call kwargs
+        # Note: Wan API uses 'size' not 'resolution' for the dimension parameter
         call_kwargs: Dict[str, Any] = {
             "api_key": self.dashscope_api_key,
             "model": api_model,
             "prompt": text,
-            "resolution": resolution,
+            "size": resolution,  # e.g., "1280*720"
             "duration": duration,
         }
 
