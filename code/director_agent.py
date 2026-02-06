@@ -1664,14 +1664,22 @@ class Api:
         duration = max(2, min(15, seconds))
 
         # Build API call kwargs
-        # Note: Wan API uses 'size' not 'resolution' for the dimension parameter
+        # t2v uses 'size' with exact dimensions: "1280*720"
+        # i2v uses 'resolution' with tier format: "720P"
         call_kwargs: Dict[str, Any] = {
             "api_key": self.dashscope_api_key,
             "model": api_model,
             "prompt": text,
-            "size": resolution,  # e.g., "1280*720"
             "duration": duration,
         }
+
+        if is_i2v:
+            # i2v uses 'resolution' param with tier format
+            resolution_tier = "720P" if "720" in resolution else "1080P"
+            call_kwargs["resolution"] = resolution_tier
+        else:
+            # t2v uses 'size' param with exact dimensions
+            call_kwargs["size"] = resolution
 
         # Handle reference image for image-to-video
         if is_i2v and pic_path:
