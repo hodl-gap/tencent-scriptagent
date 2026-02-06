@@ -1291,7 +1291,26 @@ def stitch_videos(video_paths: List[str], output_path: str) -> None:
             if not os.path.exists(path):
                 raise FileNotFoundError(f"Video file does not exist: {path}")
             clips.append(VideoFileClip(path))
-        final_clip = concatenate_videoclips(clips, method="compose")
+
+        # Normalize all clips to the same resolution
+        # Use the most common resolution (handles cases where t2v returns different res than i2v)
+        resolutions = [(clip.w, clip.h) for clip in clips]
+        from collections import Counter
+        resolution_counts = Counter(resolutions)
+        target_res = resolution_counts.most_common(1)[0][0]  # (width, height)
+
+        normalized_clips = []
+        for i, clip in enumerate(clips):
+            if (clip.w, clip.h) != target_res:
+                LOGGER.info(
+                    f"Resizing clip {i+1} from {clip.w}x{clip.h} to {target_res[0]}x{target_res[1]}"
+                )
+                resized = clip.resized(new_size=target_res)
+                normalized_clips.append(resized)
+            else:
+                normalized_clips.append(clip)
+
+        final_clip = concatenate_videoclips(normalized_clips, method="compose")
         final_clip.write_videofile(
             output_path,
             codec="libx264",
